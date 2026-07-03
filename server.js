@@ -22,6 +22,194 @@ const SHFE_NOTICE_URL = "https://www.shfe.com.cn/publicnotice/notice/";
 const KLINE_MIN_DATE = "2005-01-01";
 const KLINE_MAX_BARS = 30000;
 const NEWS_CACHE_TTL_MS = 5 * 60 * 1000;
+const NEWS_FALLBACKS = {
+  today: [
+    {
+      title: "沪铝震荡整理 社库继续去化【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103985114",
+      source: "文华财经",
+      time: "2026-07-02"
+    },
+    {
+      title: "沪铝修复力欠佳 铝合金相对抗跌【机构评论】",
+      url: "https://news.smm.cn/news/103985112",
+      source: "国信期货",
+      time: "2026-07-02"
+    },
+    {
+      title: "地缘冲突溢价消退 内外铝价连续下跌【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103982665",
+      source: "文华财经",
+      time: "2026-07-01"
+    },
+    {
+      title: "沪铝继续下跌 弱势明显【机构评论】",
+      url: "https://news.smm.cn/news/103982663",
+      source: "宝城期货",
+      time: "2026-07-01"
+    },
+    {
+      title: "金属普涨 伦锡涨超2% 沪铝铅镍、沪金跌超1% 碳酸锂飙升逾8%【SMM日评】",
+      url: "https://news.smm.cn/news/103979751",
+      source: "SMM",
+      time: "2026-06-30"
+    },
+    {
+      title: "沪铝增仓下跌 创年内新低【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103980198",
+      source: "文华财经",
+      time: "2026-06-30"
+    },
+    {
+      title: "金属涨跌互现 碳酸锂涨近5% 沪铝、沪镍领跌 沪金、沪银铂跌超2%【SMM午评】",
+      url: "https://news.smm.cn/news/103979171",
+      source: "SMM",
+      time: "2026-06-30"
+    },
+    {
+      title: "期铝触及四个月新低后反弹收升，因疲软非农数据拖累美元走弱【7月2日LME收盘】",
+      url: "https://news.smm.cn/news/103985255",
+      source: "文华财经",
+      time: "2026-07-02"
+    },
+    {
+      title: "美元走软 基本金属普跌 伦铝锌镍、沪锌跌超1% 铂涨逾5%【SMM日评】",
+      url: "https://news.smm.cn/news/103984712",
+      source: "SMM",
+      time: "2026-07-02"
+    },
+    {
+      title: "阿联酋环球铝业：阿尔塔维拉项目复产进度快于预期",
+      url: "https://news.smm.cn/news/103985124",
+      source: "文华财经",
+      time: "2026-07-02"
+    }
+  ],
+  close: [
+    {
+      title: "沪铝震荡整理 社库继续去化【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103985114",
+      source: "文华财经",
+      time: "2026-07-02"
+    },
+    {
+      title: "地缘冲突溢价消退 内外铝价连续下跌【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103982665",
+      source: "文华财经",
+      time: "2026-07-01"
+    },
+    {
+      title: "沪铝增仓下跌 创年内新低【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103980198",
+      source: "文华财经",
+      time: "2026-06-30"
+    },
+    {
+      title: "沪铝小幅上涨 社库继续下滑【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103977694",
+      source: "文华财经",
+      time: "2026-06-29"
+    },
+    {
+      title: "市场情绪修复 沪铝震荡运行【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103975074",
+      source: "文华财经",
+      time: "2026-06-26"
+    },
+    {
+      title: "沪铝低开下行 创年内新低【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103972651",
+      source: "文华财经",
+      time: "2026-06-25"
+    },
+    {
+      title: "地缘溢价出清 沪铝震荡下跌【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103967710",
+      source: "文华财经",
+      time: "2026-06-23"
+    },
+    {
+      title: "海外供应短缺局面未改 沪铝震荡运行【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103960251",
+      source: "文华财经",
+      time: "2026-06-17"
+    },
+    {
+      title: "地缘风险溢价被挤出 沪铝震荡下跌【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103958099",
+      source: "文华财经",
+      time: "2026-06-16"
+    },
+    {
+      title: "沪铝震荡运行 社库继续下滑【沪铝收盘评论】",
+      url: "https://news.smm.cn/news/103955799",
+      source: "文华财经",
+      time: "2026-06-15"
+    }
+  ],
+  exchange: [
+    {
+      title: "关于同意云南其亚金属有限公司“QY”牌铝锭注册的公告",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202607/t20260701_832360.html",
+      source: "上海期货交易所",
+      time: "2026-07-01"
+    },
+    {
+      title: "关于调整黄金等期货相关合约涨跌停板幅度和交易保证金比例的通知",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260630_832357.html",
+      source: "上海期货交易所",
+      time: "2026-06-30"
+    },
+    {
+      title: "上海国际能源交易中心发布关于调整国际铜期货相关合约涨跌停板幅度和交易保证金比例的通知",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260630_832356.html",
+      source: "上海期货交易所",
+      time: "2026-06-30"
+    },
+    {
+      title: "关于对部分客户采取限制开仓监管措施的公告",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260630_832349.html",
+      source: "上海期货交易所",
+      time: "2026-06-30"
+    },
+    {
+      title: "关于同意深圳市中金岭南有色金属股份有限公司“NH”牌银锭注册的公告",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260630_832348.html",
+      source: "上海期货交易所",
+      time: "2026-06-30"
+    },
+    {
+      title: "关于同意山东省港口集团有限公司及下属青岛港国际物流有限公司增加集团交割业务的公告",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260630_832336.html",
+      source: "上海期货交易所",
+      time: "2026-06-30"
+    },
+    {
+      title: "关于对部分客户采取限制开仓监管措施的公告",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260629_832331.html",
+      source: "上海期货交易所",
+      time: "2026-06-29"
+    },
+    {
+      title: "关于对部分客户采取限制开仓监管措施的公告",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260626_832311.html",
+      source: "上海期货交易所",
+      time: "2026-06-26"
+    },
+    {
+      title: "关于对部分客户采取限制开仓监管措施的公告",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260625_832296.html",
+      source: "上海期货交易所",
+      time: "2026-06-25"
+    },
+    {
+      title: "上海国际能源交易中心发布关于20号胶期货境外地区升贴水的公告",
+      url: "https://www.shfe.com.cn/publicnotice/notice/202606/t20260625_832285.html",
+      source: "上海期货交易所",
+      time: "2026-06-25"
+    }
+  ]
+};
 
 const DEFAULT_PRODUCT = "al";
 const US_ALUMINUM_SYMBOL = "us_AA";
@@ -516,6 +704,11 @@ function uniqueNewsItems(items) {
   });
 }
 
+function newsItemsWithFallback(sectionId, items) {
+  const fallbackItems = NEWS_FALLBACKS[sectionId] || [];
+  return uniqueNewsItems([...(items || []), ...fallbackItems]).slice(0, 10);
+}
+
 function parseSmmSearch(html) {
   const items = [];
   const matcher =
@@ -715,21 +908,21 @@ async function buildNewsPayload() {
       title: "今天",
       sourceLabel: "沪铝相关新闻",
       moreUrl: `${SMM_SEARCH_ENDPOINT}?keywords=${encodeURIComponent("沪铝")}`,
-      items: todayResult.status === "fulfilled" ? todayResult.value : []
+      items: newsItemsWithFallback("today", todayResult.status === "fulfilled" ? todayResult.value : [])
     },
     {
       id: "close",
       title: "收盘评论",
       sourceLabel: "沪铝收盘评论",
       moreUrl: `${SMM_SEARCH_ENDPOINT}?keywords=${encodeURIComponent("沪铝 收盘评论")}`,
-      items: closeResult.status === "fulfilled" ? closeResult.value : []
+      items: newsItemsWithFallback("close", closeResult.status === "fulfilled" ? closeResult.value : [])
     },
     {
       id: "exchange",
       title: "交易所公告",
       sourceLabel: "上期所公告",
       moreUrl: SHFE_NOTICE_URL,
-      items: noticeResult.status === "fulfilled" ? noticeResult.value : []
+      items: newsItemsWithFallback("exchange", noticeResult.status === "fulfilled" ? noticeResult.value : [])
     },
     {
       id: "alcoa",
