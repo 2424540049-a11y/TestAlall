@@ -236,6 +236,9 @@ const state = {
   klineCacheMode: false,
   klineSymbol: null,
   klineIntervalLoaded: null,
+  newsPayload: null,
+  newsExpanded: new Set(),
+  newsLoading: false,
   timer: null,
   installPrompt: null,
   cacheMode: false
@@ -308,6 +311,9 @@ const els = {
   klineMeta: document.querySelector("#klineMeta"),
   backtestMeta: document.querySelector("#backtestMeta"),
   backtestTrades: document.querySelector("#backtestTrades"),
+  newsOverallSummary: document.querySelector("#newsOverallSummary"),
+  newsFetchTime: document.querySelector("#newsFetchTime"),
+  newsSections: document.querySelector("#newsSections"),
   productSpecText: document.querySelector("#productSpecText"),
   toast: document.querySelector("#toast")
 };
@@ -434,6 +440,7 @@ function showView(viewName = "market") {
     button.classList.toggle("active", isActive);
   });
   if (nextView !== "chart") closeSideMenu();
+  if (nextView === "news") fetchNews();
 }
 
 function openSideMenu() {
@@ -444,6 +451,138 @@ function openSideMenu() {
 function closeSideMenu() {
   els.sideMenu?.classList.remove("open");
   els.sideMenu?.setAttribute("aria-hidden", "true");
+}
+
+function newsTimeLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "--";
+  if (/小时前|分钟前|刚刚|昨天|前天|\d{2}-\d{2}|\d{4}-\d{2}-\d{2}/.test(text)) return text;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(date);
+}
+
+function newsReaderHref(item) {
+  const params = new URLSearchParams();
+  params.set("url", item.url || "");
+  params.set("title", item.title || "新闻详情");
+  if (item.source) params.set("source", item.source);
+  if (item.time) params.set("time", newsTimeLabel(item.time));
+  if (item.description) params.set("description", item.description);
+  if (item.descriptionZh) params.set("descriptionZh", item.descriptionZh);
+  if (item.titleZh) params.set("titleZh", item.titleZh);
+  return `/news-reader.html?${params.toString()}`;
+}
+
+function renderNewsSection(section) {
+  const expanded = state.newsExpanded.has(section.id);
+  const items = section.items || [];
+  const visibleItems = items.slice(0, expanded ? 10 : 5);
+  const moreButton =
+    items.length > 5
+      ? `<button type="button" class="news-more-button" data-news-more="${escapeHtml(section.id)}">${
+          expanded ? "收起" : "更多 ›"
+        }</button>`
+      : section.moreUrl
+      ? `<a class="news-more-link" href="${escapeHtml(
+          newsReaderHref({ url: section.moreUrl, title: `${section.title}更多新闻`, source: section.sourceLabel })
+        )}" target="_blank" rel="noopener">更多 ›</a>`
+      : "";
+
+  const itemHtml = visibleItems.length
+    ? visibleItems
+        .map((item) => {
+          const readerHref = newsReaderHref({
+            url: item.url,
+            title: item.title,
+            source: item.source || section.sourceLabel,
+            time: item.time,
+            description: item.description,
+            descriptionZh: item.descriptionZh,
+            titleZh: item.titleZh
+          });
+          return `
+            <article>
+              <time>${escapeHtml(newsTimeLabel(item.time))}</time>
+              <div>
+                <a href="${escapeHtml(readerHref)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>
+                <span class="news-meta">${escapeHtml(item.source || section.sourceLabel || "")}</span>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="news-loading">暂无可用链接，稍后刷新重试。</div>`;
+
+  return `
+    <div class="news-section" data-news-section="${escapeHtml(section.id)}">
+      <div class="news-section-title">
+        <h2>${escapeHtml(section.title)}</h2>
+        ${moreButton}
+      </div>
+      <div class="section-summary">
+        <strong>今日总结</strong>
+        <span>${escapeHtml(section.summary || "")}</span>
+        ${section.summaryZh ? `<span class="summary-translation">${escapeHtml(section.summaryZh)}</span>` : ""}
+      </div>
+      ${itemHtml}
+    </div>
+  `;
+}
+
+function renderNews(payload) {
+  state.newsPayload = payload;
+  els.newsOverallSummary.textContent = payload?.summary || "暂无可用新闻，稍后刷新重试。";
+  els.newsFetchTime.textContent = payload?.fetchedAt ? `更新 ${localTime(payload.fetchedAt)}` : "--";
+  els.newsSections.innerHTML = (payload?.sections || []).map(renderNewsSection).join("");
+  els.newsSections.querySelectorAll("a[href]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const popup = window.open(link.href, "_blank", "noopener,noreferrer");
+      if (popup) popup.opener = null;
+      else window.location.assign(link.href);
+    });
+  });
+  els.newsSections.querySelectorAll("[data-news-more]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sectionId = button.dataset.newsMore;
+      if (state.newsExpanded.has(sectionId)) {
+        state.newsExpanded.delete(sectionId);
+      } else {
+        state.newsExpanded.add(sectionId);
+      }
+      renderNews(state.newsPayload);
+    });
+  });
+}
+
+async function fetchNews(force = false) {
+  if (state.newsLoading || (state.newsPayload && !force)) return;
+  state.newsLoading = true;
+  els.newsOverallSummary.textContent = "正在加载最新沪铝和美铝新闻...";
+  els.newsFetchTime.textContent = "--";
+  els.newsSections.innerHTML = "<div class=\"news-loading\">正在获取最新可点击链接...</div>";
+
+  try {
+    const response = await fetch(`/api/news?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
+    }
+    renderNews(await response.json());
+  } catch (error) {
+    els.newsOverallSummary.textContent = `新闻获取失败：${error.message}`;
+    els.newsSections.innerHTML = "<div class=\"news-loading\">暂时没有可展示的新闻链接。</div>";
+  } finally {
+    state.newsLoading = false;
+  }
 }
 
 function intervalLabel(interval = state.klineInterval) {

@@ -8,7 +8,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=22" />
+    <link rel="stylesheet" href="/styles.css?v=25" />
     <title>期货行情</title>
   </head>
   <body>
@@ -244,35 +244,14 @@
           <header class="simple-topbar">
             <h1>期市快讯</h1>
           </header>
-          <section class="news-panel">
-            <div class="news-section">
-              <div class="news-section-title">
-                <h2>重要资讯/研报</h2>
-                <button type="button">更多 ›</button>
-              </div>
-              <span class="date-chip">今天</span>
-              <article><time>18:15</time><p>沪铝：宏观情绪偏强，关注库存与现货升贴水变化</p></article>
-              <article><time>16:30</time><p>有色：国内库存延续去化，需求恢复节奏仍是短线焦点</p></article>
-              <article><time>16:02</time><p>氧化铝：供应扰动反复，价格维持高位震荡</p></article>
-              <article><time>13:30</time><p>商品：风险偏好回升，工业品多数走强</p></article>
+          <section class="news-panel" id="newsPanel" aria-live="polite">
+            <div class="news-overview">
+              <span class="date-chip">今日总结</span>
+              <p id="newsOverallSummary">正在加载最新快讯...</p>
+              <small id="newsFetchTime">--</small>
             </div>
-            <div class="news-section">
-              <div class="news-section-title">
-                <h2>收盘评论</h2>
-                <button type="button">更多 ›</button>
-              </div>
-              <span class="date-chip">今天</span>
-              <article><time>21:08</time><p>沪铝主连：周线重心上移，短线留意前高压力</p></article>
-              <article><time>17:52</time><p>螺纹钢：需求预期改善，盘面承压后回升</p></article>
-              <article><time>17:10</time><p>贵金属：美元指数技术回调，避险情绪降温</p></article>
-            </div>
-            <div class="news-section">
-              <div class="news-section-title">
-                <h2>交易所公告</h2>
-                <button type="button">更多 ›</button>
-              </div>
-              <span class="date-chip">今天</span>
-              <article><time>18:28</time><p>交易所发布合约风控提示，关注保证金和涨跌停变化</p></article>
+            <div id="newsSections" class="news-sections">
+              <div class="news-loading">正在获取沪铝和美铝相关新闻...</div>
             </div>
           </section>
         </section>
@@ -355,6 +334,6 @@
     </aside>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/app.js?v=22" type="module"></script>
+    <script src="/app.js?v=25" type="module"></script>
   </body>
 </html>

@@ -450,17 +450,6 @@ td .contract-badge {
   font-size: 16px;
 }
 
-.bottom-nav button:nth-child(n + 2)::after {
-  content: "";
-  position: absolute;
-  top: 23px;
-  right: 29%;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ec2d37;
-}
-
 .bottom-nav button.active {
   color: var(--accent);
 }
@@ -1047,6 +1036,37 @@ td .contract-badge {
   background: #3e3e3e;
 }
 
+.news-overview {
+  padding: 16px;
+  border-top: 1px solid #242424;
+  border-bottom: 9px solid #2d2d2d;
+  background: #363636;
+}
+
+.news-overview .date-chip {
+  margin: 0 0 10px;
+}
+
+.news-overview p {
+  margin: 0;
+  color: #f3f3f3;
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.news-overview small {
+  display: block;
+  margin-top: 8px;
+  color: #b8b8b8;
+  font-size: 12px;
+}
+
+.news-loading {
+  padding: 24px 16px;
+  color: #eeeeee;
+  font-size: 17px;
+}
+
 .news-section {
   border-top: 9px solid #2d2d2d;
   padding-bottom: 14px;
@@ -1078,6 +1098,38 @@ td .contract-badge {
   font-size: 18px;
 }
 
+.news-section-title a {
+  color: #d0d0d0;
+  text-decoration: none;
+  font-size: 18px;
+}
+
+.section-summary {
+  margin: 14px 16px 6px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  color: #eeeeee;
+  background: #494949;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.section-summary strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #ff8a22;
+  font-size: 15px;
+}
+
+.section-summary span {
+  display: block;
+}
+
+.section-summary .summary-translation {
+  margin-top: 6px;
+  color: #ffd21c;
+}
+
 .date-chip {
   display: inline-grid;
   min-width: 60px;
@@ -1092,21 +1144,44 @@ td .contract-badge {
 
 .news-section article {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 70px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  min-height: 47px;
+  min-height: 52px;
   padding: 0 16px;
 }
 
+.news-section article > div {
+  min-width: 0;
+}
+
 .news-section time,
-.news-section p {
+.news-section a {
   overflow: hidden;
   margin: 0;
   color: #eeeeee;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 20px;
+}
+
+.news-section a {
+  text-decoration: none;
+}
+
+.news-section a:active,
+.news-section a:hover {
+  color: #ff8a22;
+}
+
+.news-meta {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #bbbbbb;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .placeholder-panel,

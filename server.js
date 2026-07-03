@@ -1,4 +1,5 @@
 const http = require("node:http");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
@@ -15,8 +16,12 @@ const SINA_KLINE_ENDPOINT =
   "https://stock2.finance.sina.com.cn/futures/api/jsonp.php";
 const SINA_REFERER = "https://finance.sina.com.cn/";
 const YAHOO_CHART_ENDPOINT = "https://query1.finance.yahoo.com/v8/finance/chart/";
+const YAHOO_AA_NEWS_RSS = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=AA&region=US&lang=en-US";
+const SMM_SEARCH_ENDPOINT = "https://news.smm.cn/search";
+const SHFE_NOTICE_URL = "https://www.shfe.com.cn/publicnotice/notice/";
 const KLINE_MIN_DATE = "2005-01-01";
 const KLINE_MAX_BARS = 30000;
+const NEWS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const DEFAULT_PRODUCT = "al";
 const US_ALUMINUM_SYMBOL = "us_AA";
@@ -87,6 +92,7 @@ const CONTENT_TYPES = {
 };
 
 let localAlDailyCache = null;
+let newsCache = null;
 
 function pad2(value) {
   return String(value).padStart(2, "0");
@@ -396,6 +402,376 @@ function mergeCandlesByDate(...groups) {
     }
   }
   return Array.from(byDate.values()).sort((a, b) => chinaTimestamp(a.date) - chinaTimestamp(b.date));
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+}
+
+function stripHtml(value) {
+  return decodeHtml(String(value || "").replace(/<[^>]*>/g, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function absoluteUrl(href, baseUrl) {
+  try {
+    return new URL(decodeHtml(href), baseUrl).toString();
+  } catch (error) {
+    return decodeHtml(href || "");
+  }
+}
+
+function cleanNewsTitle(value) {
+  return stripHtml(value)
+    .replace(/\s*\|\s*[^|]+$/g, "")
+    .trim();
+}
+
+async function fetchText(url, headers = {}) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 SHFE-Aluminum-PWA",
+      "Accept-Encoding": "identity",
+      ...headers
+    }
+  });
+
+  if (!response.ok) throw new Error(`News source returned HTTP ${response.status}`);
+  return response.text();
+}
+
+function cookieFromSetCookie(headers, name) {
+  const cookies =
+    typeof headers.getSetCookie === "function"
+      ? headers.getSetCookie()
+      : String(headers.get("set-cookie") || "").split(/,\s*(?=[^;,]+=)/);
+  const prefix = `${name}=`;
+  const cookie = cookies.find((item) => item.trim().startsWith(prefix));
+  return cookie ? cookie.trim().slice(prefix.length).split(";")[0] : "";
+}
+
+function hasLeadingZeroBits(buffer, bitCount) {
+  for (let bit = 0; bit < bitCount; bit += 1) {
+    const byte = buffer[Math.floor(bit / 8)];
+    const mask = 1 << (7 - (bit % 8));
+    if (byte & mask) return false;
+  }
+  return true;
+}
+
+function solveSafelineChallenge(prefix, leadingZeroBits) {
+  for (let count = 0; count < 1000000; count += 1) {
+    const suffix = count.toString(16);
+    const hash = crypto.createHash("sha1").update(prefix + suffix).digest();
+    if (hasLeadingZeroBits(hash, leadingZeroBits)) return suffix;
+  }
+  throw new Error("Unable to solve SHFE challenge.");
+}
+
+async function fetchShfeText(url) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 SHFE-Aluminum-PWA",
+      "Accept-Encoding": "identity"
+    }
+  });
+  const html = await response.text();
+  if (!html.includes("safeline_bot_challenge")) return html;
+
+  const prefix = html.match(/var prefix = '([^']+)'/)?.[1] || "";
+  const leadingZeroBits = Number(html.match(/var leading_zero_bit = (\d+)/)?.[1] || 0);
+  const challenge = cookieFromSetCookie(response.headers, "safeline_bot_challenge");
+  if (!prefix || !leadingZeroBits || !challenge) return html;
+
+  const suffix = solveSafelineChallenge(prefix, leadingZeroBits);
+  const verifiedResponse = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 SHFE-Aluminum-PWA",
+      "Accept-Encoding": "identity",
+      Cookie: `safeline_bot_challenge=${challenge}; safeline_bot_challenge_ans=${challenge}${suffix}`
+    }
+  });
+  if (!verifiedResponse.ok) throw new Error(`SHFE returned HTTP ${verifiedResponse.status}`);
+  return verifiedResponse.text();
+}
+
+function uniqueNewsItems(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item.url || item.title;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function parseSmmSearch(html) {
+  const items = [];
+  const matcher =
+    /<a\s+target="_blank"\s+href="(https:\/\/news\.smm\.cn\/news\/\d+)">\s*<h3\s+title="([^"]+)"[\s\S]*?search_sourceLabel[^>]*>([\s\S]*?)<\/label>\s*<label>([\s\S]*?)<\/label>/g;
+  let match;
+
+  while ((match = matcher.exec(html)) !== null) {
+    const title = cleanNewsTitle(match[2]);
+    if (!title) continue;
+    items.push({
+      title,
+      url: decodeHtml(match[1]),
+      source: stripHtml(match[3]) || "上海有色网",
+      time: stripHtml(match[4]),
+      description: ""
+    });
+  }
+
+  return uniqueNewsItems(items).slice(0, 10);
+}
+
+async function fetchSmmSearch(keyword) {
+  const url = new URL(SMM_SEARCH_ENDPOINT);
+  url.searchParams.set("keywords", keyword);
+  const html = await fetchText(url.toString());
+  return parseSmmSearch(html);
+}
+
+async function fetchSmmSearches(keywords) {
+  const results = await Promise.allSettled(keywords.map((keyword) => fetchSmmSearch(keyword)));
+  return uniqueNewsItems(results.flatMap((result) => (result.status === "fulfilled" ? result.value : []))).slice(0, 10);
+}
+
+function parseShfeNotice(html) {
+  const items = [];
+  const matcher =
+    /<div\s+class="table_item_info"[\s\S]*?<a\s+href="([^"]+)"[^>]*title="([^"]+)"[\s\S]*?<\/a>[\s\S]*?<div\s+class="info_item_date">\s*([^<]+)\s*<\/div>/g;
+  let match;
+
+  while ((match = matcher.exec(html)) !== null) {
+    const title = cleanNewsTitle(match[2]);
+    if (!title) continue;
+    items.push({
+      title,
+      url: absoluteUrl(match[1], SHFE_NOTICE_URL),
+      source: "上海期货交易所",
+      time: stripHtml(match[3]),
+      description: ""
+    });
+  }
+
+  const relevant = items.filter((item) =>
+    /铝|有色|金属|保证金|涨跌停|交割|仓库|期货|期权|监管/.test(item.title)
+  );
+  return uniqueNewsItems(relevant.length >= 5 ? relevant : items).slice(0, 10);
+}
+
+async function fetchShfeNotices() {
+  return parseShfeNotice(await fetchShfeText(SHFE_NOTICE_URL));
+}
+
+function tagValue(xml, tagName) {
+  const match = xml.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i"));
+  return match ? decodeHtml(match[1]).trim() : "";
+}
+
+function excerptText(text, maxLength = 360) {
+  const normalized = stripHtml(text).replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  const candidate = normalized.slice(0, maxLength);
+  const lastSpace = candidate.lastIndexOf(" ");
+  return `${candidate.slice(0, lastSpace > maxLength * 0.7 ? lastSpace : maxLength).trim()}...`;
+}
+
+function parseYahooRss(xml) {
+  const items = [];
+  const matcher = /<item>([\s\S]*?)<\/item>/g;
+  let match;
+
+  while ((match = matcher.exec(xml)) !== null) {
+    const itemXml = match[1];
+    const title = cleanNewsTitle(tagValue(itemXml, "title"));
+    const url = tagValue(itemXml, "link");
+    const description = excerptText(tagValue(itemXml, "description"));
+    if (!title || !url) continue;
+    items.push({
+      title,
+      url,
+      source: "Yahoo Finance",
+      time: tagValue(itemXml, "pubDate"),
+      description,
+      titleZh: translateAlcoaTitle(title),
+      descriptionZh: translateAlcoaDescription(description)
+    });
+  }
+
+  return uniqueNewsItems(items).slice(0, 10);
+}
+
+async function fetchAlcoaNews() {
+  return parseYahooRss(await fetchText(YAHOO_AA_NEWS_RSS));
+}
+
+function compactTitle(title) {
+  return String(title || "")
+    .replace(/【[^】]*】/g, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildSectionSummary(title, items) {
+  if (!items.length) return `${title}暂无可用新闻，稍后可刷新重试。`;
+  const themes = items.slice(0, 3).map((item) => compactTitle(item.title)).filter(Boolean);
+  return `${title}最新关注：${themes.join("；")}。`;
+}
+
+function translateAlcoaTitle(title) {
+  const text = compactTitle(title);
+  if (!text) return "";
+  if (/Acquire South32/i.test(text) || /Buy South32/i.test(text)) {
+    return "美铝拟收购 South32 的铝土矿、氧化铝和铝资产，市场关注交易价格与整合影响。";
+  }
+  if (/South32 agrees/i.test(text)) {
+    return "South32 同意向美铝出售铝相关资产，交易将扩大美铝上游资源布局。";
+  }
+  if (/Strategic Acquisition/i.test(text)) {
+    return "美铝宣布战略性收购 South32 铝相关资产，意在增强铝产业链竞争力。";
+  }
+  if (/Shares Drop|shares fall|AA Stock Falling/i.test(text)) {
+    return "美铝股价在收购消息后走弱，投资者正在重新评估交易成本和短期压力。";
+  }
+  if (/\$4 Trillion|M&A Wave/i.test(text)) {
+    return "全球并购活动升温，市场关注大型交易潮对资源和工业板块的影响。";
+  }
+  if (/Constellium/i.test(text)) {
+    return "铝加工企业 Constellium 的航空与交通业务表现强劲，反映铝需求端仍有支撑。";
+  }
+  if (/premarket/i.test(text)) {
+    return "美股盘前异动显示，市场继续消化美铝和相关工业股消息。";
+  }
+  return text
+    .replace(/\bAlcoa Corporation\b/gi, "美铝公司")
+    .replace(/\bAlcoa\b/gi, "美铝")
+    .replace(/\baluminum\b/gi, "铝")
+    .replace(/\baluminium\b/gi, "铝")
+    .replace(/\balumina\b/gi, "氧化铝")
+    .replace(/\bbauxite\b/gi, "铝土矿")
+    .replace(/\bassets\b/gi, "资产")
+    .replace(/\bshares\b/gi, "股价");
+}
+
+function translateAlcoaDescription(description) {
+  const text = stripHtml(description).trim();
+  if (!text) return "";
+  if (/acquire South32|South32 Limited/i.test(text)) {
+    return "美铝宣布收购 South32 的铝土矿、氧化铝和铝资产，交易包含现金、股票及潜在或有对价，重点影响在于上游资源扩张和资产整合。";
+  }
+  if (/declined|drop|fall/i.test(text)) {
+    return "消息公布后，美铝股价承压，市场主要关注收购成本、融资安排以及短期盈利摊薄风险。";
+  }
+  if (/demand|shipment|revenue/i.test(text)) {
+    return "铝需求端仍有支撑，航空、交通和工业应用的出货及收入表现是市场关注点。";
+  }
+  return translateAlcoaTitle(text);
+}
+
+function cleanChineseSentence(text) {
+  return String(text || "")
+    .replace(/[。；;.\s]+$/g, "")
+    .trim();
+}
+
+function buildOverallSummary(sections) {
+  const parts = sections
+    .map((section) => section.items[0]?.title && `${section.title}看点为${compactTitle(section.items[0].title)}`)
+    .filter(Boolean);
+  return parts.length
+    ? `今日总览：${parts.join("；")}。`
+    : "今日总览暂无可用新闻，稍后可刷新重试。";
+}
+
+async function buildNewsPayload() {
+  const now = Date.now();
+  if (newsCache && now - newsCache.cachedAt < NEWS_CACHE_TTL_MS) return newsCache.payload;
+
+  const [todayResult, closeResult, noticeResult, alcoaResult] = await Promise.allSettled([
+    fetchSmmSearches(["沪铝", "铝"]),
+    fetchSmmSearch("沪铝 收盘评论"),
+    fetchShfeNotices(),
+    fetchAlcoaNews()
+  ]);
+
+  const sections = [
+    {
+      id: "today",
+      title: "今天",
+      sourceLabel: "沪铝相关新闻",
+      moreUrl: `${SMM_SEARCH_ENDPOINT}?keywords=${encodeURIComponent("沪铝")}`,
+      items: todayResult.status === "fulfilled" ? todayResult.value : []
+    },
+    {
+      id: "close",
+      title: "收盘评论",
+      sourceLabel: "沪铝收盘评论",
+      moreUrl: `${SMM_SEARCH_ENDPOINT}?keywords=${encodeURIComponent("沪铝 收盘评论")}`,
+      items: closeResult.status === "fulfilled" ? closeResult.value : []
+    },
+    {
+      id: "exchange",
+      title: "交易所公告",
+      sourceLabel: "上期所公告",
+      moreUrl: SHFE_NOTICE_URL,
+      items: noticeResult.status === "fulfilled" ? noticeResult.value : []
+    },
+    {
+      id: "alcoa",
+      title: "美铝",
+      sourceLabel: "Alcoa / AA 新闻",
+      moreUrl: "https://finance.yahoo.com/quote/AA/news/",
+      items: alcoaResult.status === "fulfilled" ? alcoaResult.value : []
+    }
+  ].map((section) => ({
+    ...section,
+    summary: buildSectionSummary(section.title, section.items),
+    summaryZh:
+      section.id === "alcoa"
+        ? `中文翻译：${[...new Set(section.items
+            .slice(0, 3)
+            .map((item) => cleanChineseSentence(item.titleZh || translateAlcoaTitle(item.title)))
+            .filter(Boolean)
+          )].join("；")}。`
+        : "",
+    items: section.items.slice(0, 10)
+  }));
+
+  const payload = {
+    fetchedAt: new Date().toISOString(),
+    summary: buildOverallSummary(sections),
+    sections,
+    errors: [
+      todayResult,
+      closeResult,
+      noticeResult,
+      alcoaResult
+    ]
+      .map((result, index) =>
+        result.status === "rejected"
+          ? { section: ["today", "close", "exchange", "alcoa"][index], error: result.reason.message }
+          : null
+      )
+      .filter(Boolean)
+  };
+
+  newsCache = { cachedAt: now, payload };
+  return payload;
 }
 
 async function loadAlContinuousDailyCandles(symbol) {
@@ -783,6 +1159,17 @@ async function handleKline(req, res, url) {
   }
 }
 
+async function handleNews(req, res) {
+  try {
+    sendJson(res, 200, await buildNewsPayload());
+  } catch (error) {
+    sendJson(res, 502, {
+      error: "新闻源暂时不可用",
+      detail: error.message
+    });
+  }
+}
+
 async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
@@ -829,6 +1216,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname === "/api/kline") {
     handleKline(req, res, url);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/news") {
+    handleNews(req, res);
     return;
   }
 

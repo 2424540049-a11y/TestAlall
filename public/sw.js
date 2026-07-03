@@ -1,10 +1,13 @@
-const STATIC_CACHE = "shfe-futures-static-v21";
-const DATA_CACHE = "shfe-futures-data-v21";
+const STATIC_CACHE = "shfe-futures-static-v25";
+const DATA_CACHE = "shfe-futures-data-v25";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
   "/app.js",
+  "/news-reader.html",
+  "/news-reader.css",
+  "/news-reader.js",
   "/manifest.webmanifest",
   "/icons/icon.svg",
   "/icons/icon-192.png",
